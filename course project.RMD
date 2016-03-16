@@ -1,0 +1,102 @@
+---
+title: "Practical Machine Learning, Course Project"
+author: "Xiaocheng Zeng"
+date: "March 14, 2016"
+output: html_document
+---
+
+##Summary
+With data from a study of human activity recognition and its dataset,This analysis attempts to predict the manner in which subjects did the exercises. 
+
+###Loading and Cleaning Data
+```{r message=FALSE,echo=TRUE}
+testing<-read.csv("pml-testing.csv",header=TRUE,na.strings=c("NA","#DIV/0!",""))
+training<-read.csv("pml-training.csv",header=TRUE,na.strings=c("NA","#DIV/0!",""))
+library(caret);library(rattle);library(rpart);library(randomForest)
+```
+
+####Remove columns with too many n.a. (>=60% of rows)
+```{r,echo=TRUE}
+training2<-training
+testing2<-testing
+for(i in 1:length(training)) { #for every column in the training dataset
+        if (sum(is.na(training[,i]))/nrow(training)>=.6) { #if n?? NAs > 60% of total observations
+        for(j in 1:length(training2)) {
+            if(length(grep(names(training[i]), names(training2)[j]) ) ==1)  { #if the columns are the same:
+                training2 <- training2[,-j] #Remove that column
+            }   
+        } 
+    }
+}
+
+for(i in 1:length(testing)) 
+  {if (sum(is.na(testing[,i]))/nrow(testing)>=.6) 
+    {for(j in 1:length(testing2)) 
+      {if(length(grep(names(testing[i]), names(testing2)[j]))==1)  
+        {testing2 <- testing2[,-j]}   
+      } 
+    }
+  }
+```
+
+####Remove columns irrelavant from this analysis, time stamp and row number.
+```{r,echo=TRUE}
+training2<-training2[c(-1)]
+testing2<-testing2[c(-1)]
+training2$raw_timestamp_part_1<-NULL
+training2$raw_timestamp_part_2<-NULL
+training2$cvtd_timestamp<-NULL
+testing2$raw_timestamp_part_1<-NULL
+testing2$raw_timestamp_part_2<-NULL
+testing2$cvtd_timestamp<-NULL
+```
+
+###Splitting training data into myTraining and myTesting
+```{r,echo=TRUE}
+set.seed(2988)
+inTrain<-createDataPartition(y=training2$classe,p=.75,list=FALSE)
+myTraining <- training2[inTrain,];myTesting <- training2[-inTrain,]
+dim(myTraining);dim(myTesting)
+```
+
+###Modelling
+We decide to fit rpart and random forest model to myTraining data as classe is a factor variable.
+####Decision tree
+```{r,echo=TRUE}
+fit1<-train(classe~.,method="rpart",data=myTraining)
+fancyRpartPlot(fit1$finalModel)
+```
+
+From this plot, we can see the most importance predictors for classe are roll_belt, pitch_forearm, magnet_dumbbell_y, num_window, and magnet_dumbbell_z.
+
+####Random forest
+There are 55 predictors in myTraining data. It is better to narrow down them into the most important ones so that our processors and RAM can handle it. We pick the five most important for random forest model.
+```{r,echo=TRUE}
+RFimp<-randomForest(myTraining[,-56], myTraining[,56], importance=TRUE)
+RFimpdf<-data.frame(RFimp$importance)
+impPredictors<-order(-RFimpdf$MeanDecreaseGini)
+inImp<-createDataPartition(training2$classe, p=.05, list=FALSE)
+featurePlot(myTraining[inImp,impPredictors[1:5]],myTraining$classe[inImp], plot = "pairs")
+myTrainingfr<-myTraining[,c("classe","num_window","roll_belt","yaw_belt","pitch_forearm","magnet_dumbbell_z")]
+```
+We find out the most important five predictors are num_window, roll_belt, yaw_belt, pitch_forearm, and magnet_dumbbell_z. Therefore, we fit a random forest model with these five predictors only.
+```{r,echo=TRUE}
+fit2<-train(classe~.,method="rf",data=myTrainingfr,trControl=trainControl(method="oob"))
+```
+
+###Out of Sample Error
+With data myTesting, We predict classe with rpart and random forest models from myTraining and compare them with true classe in myTesting respectively. 
+```{r,echo=TRUE}
+pred1<-predict(fit1,myTesting)
+pred2<-predict(fit2,myTesting)
+confusionMatrix(pred1,myTesting$classe)
+confusionMatrix(pred2,myTesting$classe)
+```
+Random forest model has much higher accuracy in predicting classe in myTesting data. Hence, we will predict classe for 20 test cases with the random forest model.
+
+###Predict with Testing data for submission
+```{r,echo=TRUE}
+predtesting<-predict(fit2,testing2)
+submission<-data.frame(predtesting,testing2$problem_id)
+submission
+```
